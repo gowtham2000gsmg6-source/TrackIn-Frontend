@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Users, LogIn, LogOut as LogOutIcon, Loader2, RefreshCw } from 'lucide-react'
+import { Bluetooth, BluetoothOff, Users, LogIn, LogOut as LogOutIcon, Loader2, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getDashboard, checkOut, admitVisitor } from '../api/visitors'
 import { apiErrorMessage } from '../api/client'
@@ -104,6 +104,14 @@ export default function Dashboard() {
               <div className="min-w-0">
                 <p className="text-sm text-brass-50 truncate">{v.full_name}</p>
                 <p className="text-xs text-white/40 font-mono">{v.visitor_id} · {v.department}</p>
+                {v.bluetooth_device_name && (
+                  <p className={`text-xs mt-1 flex items-center gap-1 ${
+                    v.bluetooth_device_active ? 'text-signal-green' : 'text-signal-amber'
+                  }`}>
+                    {v.bluetooth_device_active ? <Bluetooth size={12} /> : <BluetoothOff size={12} />}
+                    {v.bluetooth_device_name} · {v.bluetooth_device_active ? 'connected' : 'last seen'}
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-3 shrink-0">
                 <StatusBadge status={v.status} />

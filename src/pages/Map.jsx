@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, Circle, CircleMarker, useMap } from 'react-leaflet'
 import L from 'leaflet'
-import { MapPin, Loader2, RefreshCw, Wifi, WifiOff } from 'lucide-react'
+import { Bluetooth, BluetoothOff, MapPin, Loader2, RefreshCw, Wifi, WifiOff } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getLiveAll, getLocationReceivers, getVisitorLocationLogs } from '../api/visitors'
 import { apiErrorMessage, parseApiTimestamp } from '../api/client'
@@ -169,6 +169,11 @@ export default function MapPage() {
                   <p className="font-semibold">{v.full_name}</p>
                   <p className="text-xs text-slate-500">{v.visitor_id} · {v.department}</p>
                   <p className="text-xs mt-1">{v.purpose}</p>
+                  {v.bluetooth_device_name && (
+                    <p className={`text-xs mt-2 ${v.bluetooth_device_active ? 'text-emerald-700' : 'text-amber-700'}`}>
+                      Bluetooth: {v.bluetooth_device_name} · {v.bluetooth_device_active ? 'connected' : 'last seen'}
+                    </p>
+                  )}
                   {v.last_updated && (
                     <p className="text-[11px] text-slate-400 mt-1">
                       updated {parseApiTimestamp(v.last_updated).toLocaleTimeString()}
@@ -251,6 +256,14 @@ export default function MapPage() {
                     {v.full_name}
                   </p>
                   <p className="text-xs text-white/40 font-mono">{v.visitor_id} · {v.department}</p>
+                  {v.bluetooth_device_name && (
+                    <p className={`text-xs mt-1 flex items-center gap-1 ${
+                      v.bluetooth_device_active ? 'text-signal-green' : 'text-signal-amber'
+                    }`}>
+                      {v.bluetooth_device_active ? <Bluetooth size={12} /> : <BluetoothOff size={12} />}
+                      {v.bluetooth_device_name} · {v.bluetooth_device_active ? 'connected' : 'last seen'}
+                    </p>
+                  )}
                 </div>
                 <StatusBadge status={v.status} />
               </button>
