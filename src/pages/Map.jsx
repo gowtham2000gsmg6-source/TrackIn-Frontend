@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Circle, CircleMarker, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { MapPin, Loader2, RefreshCw, Wifi, WifiOff } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { getLiveAll } from '../api/visitors'
-import { apiErrorMessage } from '../api/client'
+import { getLiveAll, getLocationReceivers, getVisitorLocationLogs } from '../api/visitors'
+import { apiErrorMessage, parseApiTimestamp } from '../api/client'
 import StatusBadge from '../components/StatusBadge.jsx'
 
 import 'leaflet/dist/leaflet.css'
@@ -27,7 +27,7 @@ const defaultIcon = L.icon({
 L.Marker.prototype.options.icon = defaultIcon
 
 // Fallback centre: MCET campus (used until we have any live GPS fix).
-const DEFAULT_CENTER = [11.4230, 76.9698]
+const DEFAULT_CENTER = [10.5983, 77.0270]
 const DEFAULT_ZOOM = 16
 
 function FitToMarkers({ points, selected }) {
@@ -55,14 +55,22 @@ function FlyToSelected({ selected }) {
 
 export default function MapPage() {
   const [visitors, setVisitors] = useState([])
+  const [receivers, setReceivers] = useState([])
+  const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState(null)
   const markerRefs = React.useRef({})
 
   const load = useCallback(async () => {
     try {
-      const data = await getLiveAll()
-      setVisitors(data)
+      const [live, anchors, entries] = await Promise.all([
+        getLiveAll(),
+        getLocationReceivers(),
+        getVisitorLocationLogs(100),
+      ])
+      setVisitors(live)
+      setReceivers(anchors)
+      setLogs(entries)
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Could not load live locations'))
     } finally {
@@ -78,7 +86,10 @@ export default function MapPage() {
 
   const located = visitors.filter((v) => v.last_latitude != null && v.last_longitude != null)
   const notLocated = visitors.filter((v) => v.last_latitude == null || v.last_longitude == null)
-  const points = located.map((v) => [v.last_latitude, v.last_longitude])
+  const points = [
+    ...located.map((v) => [v.last_latitude, v.last_longitude]),
+    ...receivers.filter((r) => r.status === 'active').map((r) => [r.latitude, r.longitude]),
+  ]
   const selected = located.find((v) => v.visitor_id === selectedId) || null
 
   const handleSelect = (visitorId) => {
@@ -160,14 +171,64 @@ export default function MapPage() {
                   <p className="text-xs mt-1">{v.purpose}</p>
                   {v.last_updated && (
                     <p className="text-[11px] text-slate-400 mt-1">
-                      updated {new Date(v.last_updated).toLocaleTimeString()}
+                      updated {parseApiTimestamp(v.last_updated).toLocaleTimeString()}
                     </p>
                   )}
                 </div>
               </Popup>
             </Marker>
           ))}
+          {receivers.filter((receiver) => receiver.status === 'active').map((receiver) => {
+            const color = receiver.is_restricted ? '#ef4444' : '#22c55e'
+            return (
+              <React.Fragment key={`receiver-${receiver.id}`}>
+                <Circle
+                  center={[receiver.latitude, receiver.longitude]}
+                  radius={receiver.radius_m}
+                  pathOptions={{ color, fillColor: color, fillOpacity: 0.12, weight: 2 }}
+                />
+                <CircleMarker
+                  center={[receiver.latitude, receiver.longitude]}
+                  radius={8}
+                  pathOptions={{ color: '#0f172a', weight: 2, fillColor: color, fillOpacity: 1 }}
+                >
+                  <Popup>
+                    <div className="text-sm">
+                      <p className="font-semibold">{receiver.name}</p>
+                      <p className="text-xs">{receiver.is_restricted ? 'Restricted' : 'Unrestricted'} · {receiver.radius_m} m radius</p>
+                      <p className="text-[11px] text-slate-500">
+                        {receiver.latitude.toFixed(6)}, {receiver.longitude.toFixed(6)}
+                      </p>
+                    </div>
+                  </Popup>
+                </CircleMarker>
+              </React.Fragment>
+            )
+          })}
         </MapContainer>
+      </div>
+
+      <div className="border border-white/10 mb-6">
+        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+          <h2 className="text-sm text-brass-50">Active receiver anchors ({receivers.filter((r) => r.status === 'active').length})</h2>
+          <div className="flex gap-3 text-[11px] text-white/45">
+            <span className="text-signal-red">Restricted</span>
+            <span className="text-signal-green">Unrestricted</span>
+          </div>
+        </div>
+        <div className="grid sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-white/10">
+          {receivers.filter((r) => r.status === 'active').map((receiver) => (
+            <div key={receiver.id} className="px-4 py-3">
+              <p className={`text-sm ${receiver.is_restricted ? 'text-signal-red' : 'text-signal-green'}`}>
+                {receiver.name} · {receiver.is_restricted ? 'Restricted' : 'Unrestricted'}
+              </p>
+              <p className="text-xs text-white/40 mt-1">{receiver.radius_m} m geofence · Receiver #{receiver.id}</p>
+            </div>
+          ))}
+          {!receivers.some((r) => r.status === 'active') && (
+            <p className="px-4 py-5 text-sm text-white/35">No active receiver anchors. Configure them under Location Receivers.</p>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -199,7 +260,7 @@ export default function MapPage() {
           </div>
         </div>
 
-        <div className="border border-white/10">
+          <div className="border border-white/10">
           <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2 text-brass-50">
             <WifiOff size={15} className="text-white/40" />
             <h2 className="text-sm">Location not on ({notLocated.length})</h2>
@@ -217,6 +278,27 @@ export default function MapPage() {
               <p className="px-4 py-6 text-center text-sm text-white/35">Everyone on campus is sharing location.</p>
             )}
           </div>
+        </div>
+      </div>
+
+      <div className="border border-white/10 mt-6">
+        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+          <h2 className="text-sm">Recent receiver proximity entries</h2>
+          <span className="text-[11px] text-white/35">GPS geofence transitions and receiver BLE reports</span>
+        </div>
+        <div className="divide-y divide-white/10">
+          {logs.length ? logs.slice(0, 20).map((log) => {
+            const visitor = visitors.find((item) => item.visitor_id === log.visitor_id)
+            return (
+              <div key={log.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+                <div>
+                  <p className="text-sm text-brass-50">{visitor?.full_name || log.visitor_id} <span className="font-mono text-xs text-white/40">{log.visitor_id}</span></p>
+                  <p className="text-xs text-white/45 mt-1">{log.receiver_name} · {log.detected_via} · {log.distance_m == null ? 'distance unavailable' : `${log.distance_m} m`}</p>
+                </div>
+                <time className="text-xs text-white/40">{parseApiTimestamp(log.timestamp).toLocaleString()}</time>
+              </div>
+            )
+          }) : <p className="px-4 py-6 text-center text-sm text-white/35">No receiver proximity entries yet.</p>}
         </div>
       </div>
     </div>

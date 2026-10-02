@@ -21,6 +21,18 @@ export const getHistory = (params) => api.get('/visitors/history', { params }).t
 // Live locations of everyone currently on campus / pending entry — used by the Map view.
 export const getLiveAll = () => api.get('/visitors/live/all').then((r) => r.data)
 
+export const getLocationReceivers = () =>
+  api.get('/admin/location-receivers').then((r) => r.data)
+
+export const getVisitorLocationLogs = (limit = 100) =>
+  api.get('/admin/visitor-location-logs', { params: { limit } }).then((r) => r.data)
+
+export const createLocationReceiver = (payload) =>
+  api.post('/admin/location-receivers', payload).then((r) => r.data)
+
+export const updateLocationReceiver = (receiverId, payload) =>
+  api.patch(`/admin/location-receivers/${receiverId}`, payload).then((r) => r.data)
+
 // ---------- Public visitor self-check-in (no login, QR / link based) ----------
 
 // Visitor fills the form themselves; no admin/visitor role picker — this is

@@ -8,6 +8,9 @@ import Active from './pages/Active.jsx'
 import History from './pages/History.jsx'
 import MapPage from './pages/Map.jsx'
 import VisitorCheckIn from './pages/VisitorCheckIn.jsx'
+import ReceiverLogin from './pages/ReceiverLogin.jsx'
+import ReceiverDashboard, { ReceiverGuard } from './pages/ReceiverDashboard.jsx'
+import Receivers from './pages/Receivers.jsx'
 import Layout from './components/Layout.jsx'
 import ProtectedRoute from './components/ProtectedRoute.jsx'
 
@@ -23,6 +26,8 @@ export default function App() {
       <Routes>
         {/* Public, login-free — reached by scanning the gate QR code / link. */}
         <Route path="/visit" element={<VisitorCheckIn />} />
+        <Route path="/receiver" element={<ReceiverLogin />} />
+        <Route path="/receiver/dashboard" element={<ReceiverGuard><ReceiverDashboard /></ReceiverGuard>} />
         <Route path="/login" element={<Login />} />
         <Route
           path="/*"
@@ -34,6 +39,7 @@ export default function App() {
                   <Route path="/check-in" element={<CheckIn />} />
                   <Route path="/active" element={<Active />} />
                   <Route path="/map" element={<MapPage />} />
+                  <Route path="/receivers" element={<Receivers />} />
                   <Route path="/history" element={<History />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>

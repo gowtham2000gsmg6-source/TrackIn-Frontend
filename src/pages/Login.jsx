@@ -72,6 +72,10 @@ export default function Login() {
             {loading ? <Loader2 size={16} className="animate-spin" /> : null}
             {loading ? 'Signing in…' : 'Sign in'}
           </button>
+
+          <p className="text-[11px] text-white/30 mt-5 text-center">
+            Seeded account: <span className="font-mono text-white/50">admin / admin123</span>
+          </p>
         </form>
       </div>
     </div>

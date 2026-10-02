@@ -31,9 +31,12 @@ export default function VisitorCheckIn() {
   const [errors, setErrors] = useState({})
   const [submitting, setSubmitting] = useState(false)
   const [visitor, setVisitor] = useState(null) // { visitor_id, full_name, access_token }
-  const [locationStatus, setLocationStatus] = useState('idle') // idle | requesting | sharing | denied | error
+  const [locationStatus, setLocationStatus] = useState('idle') // idle | requesting | sharing | denied | error | ended
   const [lastSent, setLastSent] = useState(null)
   const watchIdRef = useRef(null)
+  const pendingPositionRef = useRef(null)
+  const sendingLocationRef = useRef(false)
+  const trackingEndedRef = useRef(false)
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -88,20 +91,42 @@ export default function VisitorCheckIn() {
     setLocationStatus('requesting')
 
     const send = async (position) => {
-      const { latitude, longitude, accuracy, speed, heading } = position.coords
+      if (trackingEndedRef.current) return
+      pendingPositionRef.current = position
+      if (sendingLocationRef.current) return
+      sendingLocationRef.current = true
       try {
-        await pushLocation(visitor.access_token, {
-          latitude,
-          longitude,
-          accuracy,
-          speed: speed ?? undefined,
-          heading: heading ?? undefined,
-        })
-        setLocationStatus('sharing')
-        setLastSent(new Date())
-      } catch (err) {
-        // Don't spam toasts on every watch tick — surface once via state.
-        setLocationStatus('error')
+        while (pendingPositionRef.current && !trackingEndedRef.current) {
+          const nextPosition = pendingPositionRef.current
+          pendingPositionRef.current = null
+          const { latitude, longitude, accuracy, speed, heading } = nextPosition.coords
+          try {
+            await pushLocation(visitor.access_token, {
+              latitude,
+              longitude,
+              accuracy,
+              speed: speed ?? undefined,
+              heading: heading ?? undefined,
+            })
+            setLocationStatus('sharing')
+            setLastSent(new Date())
+          } catch (err) {
+            if (err.response?.status === 401 || err.response?.status === 403) {
+              trackingEndedRef.current = true
+              pendingPositionRef.current = null
+              if (watchIdRef.current !== null) {
+                navigator.geolocation.clearWatch(watchIdRef.current)
+                watchIdRef.current = null
+              }
+              setLocationStatus('ended')
+              break
+            }
+            // Don't spam toasts on every watch tick — surface once via state.
+            setLocationStatus('error')
+          }
+        }
+      } finally {
+        sendingLocationRef.current = false
       }
     }
 
@@ -174,7 +199,7 @@ export default function VisitorCheckIn() {
               {locationStatus === 'idle' && (
                 <>
                   <p className="text-sm text-white/50 mb-4">
-                    Turn on location so gate security can see you on campus while you're here.
+                    Turn on location to share your coordinates with campus security and record geofence entries while you are on campus.
                   </p>
                   <button onClick={startSharingLocation} className="btn-primary w-full">
                     <MapPin size={16} /> Turn On Location
@@ -210,6 +235,9 @@ export default function VisitorCheckIn() {
                   <span>Couldn't reach the server to share your location. Check your connection.</span>
                 </div>
               )}
+              {locationStatus === 'ended' && (
+                <p className="text-sm text-white/50">Location sharing stopped because the visit ended or its tracking session expired.</p>
+              )}
               {(locationStatus === 'denied' || locationStatus === 'error') && (
                 <button onClick={startSharingLocation} className="btn-ghost w-full mt-3 text-xs">
                   Try Again
@@ -218,7 +246,7 @@ export default function VisitorCheckIn() {
             </div>
 
             <p className="text-[11px] text-white/30">
-              Please check out at the gate before you leave campus.
+              Keep this page open while sharing; mobile browsers may pause location tracking in the background. Please check out at the gate before you leave.
             </p>
           </div>
         )}

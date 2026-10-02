@@ -34,6 +34,12 @@ export function apiErrorMessage(error, fallback = 'Something went wrong. Try aga
   return error?.response?.data?.detail || error?.message || fallback
 }
 
+export function parseApiTimestamp(value) {
+  if (!value) return null
+  const timestamp = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? value : `${value}Z`
+  return new Date(timestamp)
+}
+
 // A second, "bare" axios instance for the public visitor self-check-in flow.
 // It must NOT auto-attach an admin token (a gate-staff member could be signed
 // in on the same browser), so the visitor's own short-lived token is passed

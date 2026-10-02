@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { LayoutGrid, UserPlus, Users, History, LogOut, ShieldCheck, Menu, X, MapPin } from 'lucide-react'
+import { LayoutGrid, UserPlus, Users, History, LogOut, ShieldCheck, Menu, X, MapPin, Radio } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 
 const NAV = [
@@ -8,6 +8,7 @@ const NAV = [
   { to: '/check-in', label: 'Check In', icon: UserPlus },
   { to: '/active', label: 'On Campus', icon: Users },
   { to: '/map', label: 'Visitor Map', icon: MapPin },
+  { to: '/receivers', label: 'Location Receivers', icon: Radio },
   { to: '/history', label: 'Visitor Log', icon: History },
 ]
 
