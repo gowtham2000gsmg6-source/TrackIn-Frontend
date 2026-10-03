@@ -48,13 +48,3 @@ export const pushLocation = (visitorToken, payload) =>
       headers: { Authorization: `Bearer ${visitorToken}` },
     })
     .then((r) => r.data)
-
-export const reportVisitorBluetoothDevice = (visitorToken, device_name) =>
-  visitorApi.put('/visitors/bluetooth-device', { device_name }, {
-    headers: { Authorization: `Bearer ${visitorToken}` },
-  }).then((r) => r.data)
-
-export const stopVisitorBluetoothDevice = (visitorToken) =>
-  visitorApi.delete('/visitors/bluetooth-device', {
-    headers: { Authorization: `Bearer ${visitorToken}` },
-  }).then((r) => r.data)

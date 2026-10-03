@@ -1,10 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
-import { AlertTriangle, Bluetooth, LogOut, MapPin, Radio, ShieldAlert, ShieldCheck, Wifi } from 'lucide-react'
-import { getReceiver, receiverHeartbeat, reportBluetoothDetection } from '../api/receivers'
+import { AlertTriangle, LogOut, MapPin, Radio, ShieldAlert, ShieldCheck, Wifi } from 'lucide-react'
+import { getReceiver, receiverHeartbeat } from '../api/receivers'
 import { apiErrorMessage, parseApiTimestamp } from '../api/client'
-
-const BEACON_PREFIX = 'MCET:'
 
 export function ReceiverGuard({ children }) {
   return sessionStorage.getItem('mcet_receiver_token')
@@ -16,20 +14,7 @@ export default function ReceiverDashboard() {
   const navigate = useNavigate()
   const [receiver, setReceiver] = useState(null)
   const [error, setError] = useState('')
-  const [scanState, setScanState] = useState('idle')
-  const [scanMessage, setScanMessage] = useState('')
-  const [lastDetection, setLastDetection] = useState(null)
-  const scanRef = useRef(null)
-  const advertisementHandlerRef = useRef(null)
-  const seenRef = useRef(new Map())
-
   const signOut = useCallback(() => {
-    if (scanRef.current) scanRef.current.stop()
-    scanRef.current = null
-    if (advertisementHandlerRef.current && navigator.bluetooth) {
-      navigator.bluetooth.removeEventListener('advertisementreceived', advertisementHandlerRef.current)
-    }
-    advertisementHandlerRef.current = null
     sessionStorage.removeItem('mcet_receiver_token')
     sessionStorage.removeItem('mcet_receiver_id')
     navigate('/receiver', { replace: true })
@@ -69,70 +54,8 @@ export default function ReceiverDashboard() {
     return () => {
       mounted = false
       window.clearInterval(interval)
-      if (scanRef.current) scanRef.current.stop()
-      scanRef.current = null
-      if (advertisementHandlerRef.current && navigator.bluetooth) {
-        navigator.bluetooth.removeEventListener('advertisementreceived', advertisementHandlerRef.current)
-      }
-      advertisementHandlerRef.current = null
     }
   }, [signOut])
-
-  const startBluetoothScan = async () => {
-    setScanMessage('')
-    if (!window.isSecureContext) {
-      setScanState('unavailable')
-      setScanMessage('Bluetooth scanning requires HTTPS (or localhost).')
-      return
-    }
-    const bluetooth = navigator.bluetooth
-    if (!bluetooth || typeof bluetooth.requestLEScan !== 'function') {
-      setScanState('unavailable')
-      setScanMessage('This browser does not expose Web Bluetooth LE scanning. Keep GPS geofencing enabled; use a supported Android Chrome build for BLE.')
-      return
-    }
-    try {
-      if (scanRef.current) scanRef.current.stop()
-      const scan = await bluetooth.requestLEScan({
-        filters: [{ namePrefix: BEACON_PREFIX }],
-        keepRepeatedDevices: true,
-      })
-      scanRef.current = scan
-      const onAdvertisement = async (event) => {
-        const name = event.device?.name || ''
-        if (!name.startsWith(BEACON_PREFIX)) return
-        const visitorId = name.slice(BEACON_PREFIX.length).trim()
-        if (!/^MCET-\d+$/i.test(visitorId)) return
-        const now = Date.now()
-        if (now - (seenRef.current.get(visitorId) || 0) < 30000) return
-        seenRef.current.set(visitorId, now)
-        try {
-          const log = await reportBluetoothDetection(visitorId)
-          setLastDetection(`${log.visitor_id} near ${log.receiver_name} · Bluetooth`)
-          setScanMessage(`Detected ${log.visitor_id} at ${parseApiTimestamp(log.timestamp).toLocaleTimeString()}.`)
-        } catch (err) {
-          setScanMessage(apiErrorMessage(err, `Could not record beacon ${visitorId}.`))
-        }
-      }
-      advertisementHandlerRef.current = onAdvertisement
-      bluetooth.addEventListener('advertisementreceived', onAdvertisement)
-      setScanState('scanning')
-      setScanMessage(`Scanning for visitor beacons advertising ${BEACON_PREFIX}<visitor-id>.`)
-    } catch (err) {
-      setScanState('error')
-      setScanMessage(apiErrorMessage(err, 'Bluetooth scan could not start. Check browser permissions and try again.'))
-    }
-  }
-
-  const stopBluetoothScan = () => {
-    if (scanRef.current) scanRef.current.stop()
-    if (advertisementHandlerRef.current && navigator.bluetooth) {
-      navigator.bluetooth.removeEventListener('advertisementreceived', advertisementHandlerRef.current)
-    }
-    scanRef.current = null
-    advertisementHandlerRef.current = null
-    setScanState('idle')
-  }
 
   if (!sessionStorage.getItem('mcet_receiver_token')) return <Navigate to="/receiver" replace />
 
@@ -190,29 +113,10 @@ export default function ReceiverDashboard() {
             </section>
 
             <section className="border border-white/10 bg-[#0D1521] p-5 mt-5">
-              <div className="flex items-center gap-2">
-                <Bluetooth size={17} className={scanState === 'scanning' ? 'text-signal-green' : 'text-brass-300'} />
-                <h2 className="text-sm">Supplementary Bluetooth scan</h2>
-                <span className="ml-auto text-[11px] uppercase tracking-wider text-white/40">
-                  {scanState === 'scanning' ? 'Scanning' : scanState}
-                </span>
-              </div>
+              <h2 className="text-sm flex items-center gap-2"><Radio size={16} /> Native BLE receiver</h2>
               <p className="text-xs leading-relaxed text-white/45 mt-3">
-                BLE is opt-in and browser-limited. A visitor must advertise a Bluetooth device named
-                <code className="mx-1 text-brass-200">{BEACON_PREFIX}MCET-0001</code>
-                (using their own configured beacon hardware/app). Ordinary phones cannot be silently discovered by a webpage.
+                This browser page cannot run a reliable background BLE scan. Install the MCET Location Monitor Android app, choose Fixed receiver, and sign in with this receiver ID and PIN to scan consented visitor beacons without pairing.
               </p>
-              {lastDetection && <p className="text-xs text-signal-green mt-3">{lastDetection}</p>}
-              {scanMessage && <p role="status" className="text-xs text-white/60 mt-3">{scanMessage}</p>}
-              <div className="mt-4">
-                {scanState === 'scanning' ? (
-                  <button className="btn-ghost text-xs" onClick={stopBluetoothScan}>Stop Bluetooth scan</button>
-                ) : (
-                  <button className="btn-primary text-xs" onClick={startBluetoothScan}>
-                    <Bluetooth size={14} /> Start Bluetooth scan
-                  </button>
-                )}
-              </div>
             </section>
           </>
         )}

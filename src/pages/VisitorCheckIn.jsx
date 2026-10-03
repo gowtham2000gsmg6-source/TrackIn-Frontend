@@ -1,12 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { ShieldCheck, MapPin, Loader2, CheckCircle2, Radio, AlertTriangle, Bluetooth, BluetoothOff } from 'lucide-react'
+import { ShieldCheck, MapPin, Loader2, CheckCircle2, Radio, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
-import {
-  registerVisitor,
-  pushLocation,
-  reportVisitorBluetoothDevice,
-  stopVisitorBluetoothDevice,
-} from '../api/visitors'
+import { registerVisitor, pushLocation } from '../api/visitors'
 import { apiErrorMessage } from '../api/client'
 
 const EMPTY = {
@@ -35,19 +30,14 @@ export default function VisitorCheckIn() {
   const [form, setForm] = useState(EMPTY)
   const [errors, setErrors] = useState({})
   const [submitting, setSubmitting] = useState(false)
+  const [smsConsent, setSmsConsent] = useState(false)
   const [visitor, setVisitor] = useState(null) // { visitor_id, full_name, access_token }
   const [locationStatus, setLocationStatus] = useState('idle') // idle | requesting | sharing | denied | error | ended
   const [lastSent, setLastSent] = useState(null)
-  const [bluetoothStatus, setBluetoothStatus] = useState('idle')
-  const [bluetoothDeviceName, setBluetoothDeviceName] = useState('')
-  const [bluetoothError, setBluetoothError] = useState('')
   const watchIdRef = useRef(null)
   const pendingPositionRef = useRef(null)
   const sendingLocationRef = useRef(false)
   const trackingEndedRef = useRef(false)
-  const bluetoothDeviceRef = useRef(null)
-  const bluetoothHeartbeatRef = useRef(null)
-  const bluetoothDisconnectHandlerRef = useRef(null)
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -77,6 +67,7 @@ export default function VisitorCheckIn() {
         email: form.email.trim() || undefined,
         device_info: navigator.userAgent?.slice(0, 120),
         browser_info: `${navigator.platform || ''}`.slice(0, 60),
+        restricted_sms_consent: smsConsent,
       }
       const result = await registerVisitor(payload)
       setVisitor(result)
@@ -112,12 +103,15 @@ export default function VisitorCheckIn() {
           pendingPositionRef.current = null
           const { latitude, longitude, accuracy, speed, heading } = nextPosition.coords
           try {
-            await pushLocation(visitor.access_token, {
+            const update = await pushLocation(visitor.access_token, {
               latitude,
               longitude,
               accuracy,
               speed: speed ?? undefined,
               heading: heading ?? undefined,
+            })
+            update.restricted_area_entries?.forEach((entry) => {
+              toast.error(`Restricted area alert: you are entering ${entry.receiver_name}.`)
             })
             setLocationStatus('sharing')
             setLastSent(new Date())
@@ -157,103 +151,10 @@ export default function VisitorCheckIn() {
     )
   }
 
-  const stopBluetoothSharing = async () => {
-    if (bluetoothHeartbeatRef.current !== null) {
-      window.clearInterval(bluetoothHeartbeatRef.current)
-      bluetoothHeartbeatRef.current = null
-    }
-    const device = bluetoothDeviceRef.current
-    if (device && bluetoothDisconnectHandlerRef.current) {
-      device.removeEventListener('gattserverdisconnected', bluetoothDisconnectHandlerRef.current)
-    }
-    bluetoothDisconnectHandlerRef.current = null
-    bluetoothDeviceRef.current = null
-    if (device?.gatt?.connected) device.gatt.disconnect()
-    setBluetoothStatus('idle')
-    setBluetoothDeviceName('')
-    try {
-      if (visitor?.access_token) await stopVisitorBluetoothDevice(visitor.access_token)
-    } catch (err) {
-      setBluetoothError(apiErrorMessage(err, 'Could not stop Bluetooth reporting on the server.'))
-    }
-  }
-
-  const startBluetoothSharing = async () => {
-    setBluetoothError('')
-    const bluetooth = navigator.bluetooth
-    if (!window.isSecureContext) {
-      setBluetoothStatus('unavailable')
-      setBluetoothError('Bluetooth selection requires HTTPS (or localhost).')
-      return
-    }
-    if (!bluetooth || typeof bluetooth.requestDevice !== 'function') {
-      setBluetoothStatus('unavailable')
-      setBluetoothError('This browser does not support Web Bluetooth. You can continue sharing GPS without it.')
-      return
-    }
-
-    setBluetoothStatus('selecting')
-    try {
-      const device = await bluetooth.requestDevice({ acceptAllDevices: true })
-      if (!device.gatt) {
-        throw new Error('The selected Bluetooth device does not support a browser GATT connection.')
-      }
-      await device.gatt.connect()
-      bluetoothDeviceRef.current = device
-      const deviceName = (device.name || 'Unnamed Bluetooth device').slice(0, 100)
-      const disconnectHandler = async () => {
-        if (bluetoothDeviceRef.current !== device) return
-        bluetoothDeviceRef.current = null
-        bluetoothDisconnectHandlerRef.current = null
-        if (bluetoothHeartbeatRef.current !== null) {
-          window.clearInterval(bluetoothHeartbeatRef.current)
-          bluetoothHeartbeatRef.current = null
-        }
-        setBluetoothStatus('disconnected')
-        setBluetoothDeviceName('')
-        try {
-          await stopVisitorBluetoothDevice(visitor.access_token)
-        } catch (err) {
-          setBluetoothError(apiErrorMessage(err, 'Bluetooth disconnected, but the server status could not be updated.'))
-        }
-      }
-      bluetoothDisconnectHandlerRef.current = disconnectHandler
-      device.addEventListener('gattserverdisconnected', disconnectHandler)
-      await reportVisitorBluetoothDevice(visitor.access_token, deviceName)
-      setBluetoothDeviceName(deviceName)
-      setBluetoothStatus('connected')
-      bluetoothHeartbeatRef.current = window.setInterval(async () => {
-        if (!device.gatt?.connected) return
-        try {
-          await reportVisitorBluetoothDevice(visitor.access_token, deviceName)
-        } catch (err) {
-          setBluetoothError(apiErrorMessage(err, 'Could not refresh Bluetooth status on the server.'))
-        }
-      }, 30000)
-    } catch (err) {
-      if (bluetoothDeviceRef.current?.gatt?.connected) bluetoothDeviceRef.current.gatt.disconnect()
-      bluetoothDeviceRef.current = null
-      setBluetoothStatus('error')
-      setBluetoothError(apiErrorMessage(err, 'Bluetooth permission or connection failed. You can retry or continue with GPS only.'))
-    }
-  }
-
   useEffect(() => {
     return () => {
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current)
-      }
-      if (bluetoothHeartbeatRef.current !== null) {
-        window.clearInterval(bluetoothHeartbeatRef.current)
-      }
-      if (bluetoothDeviceRef.current && bluetoothDisconnectHandlerRef.current) {
-        bluetoothDeviceRef.current.removeEventListener(
-          'gattserverdisconnected',
-          bluetoothDisconnectHandlerRef.current,
-        )
-      }
-      if (bluetoothDeviceRef.current?.gatt?.connected) {
-        bluetoothDeviceRef.current.gatt.disconnect()
       }
     }
   }, [])
@@ -265,7 +166,10 @@ export default function VisitorCheckIn() {
           <ShieldCheck size={20} strokeWidth={1.75} />
           <span className="font-display text-lg">MCET Gate</span>
         </div>
-        <p className="text-center text-sm text-white/40 mb-8">Visitor Self Check-In</p>
+        <p className="text-center text-sm text-white/40 mb-3">Visitor Self Check-In</p>
+        <p className="text-center text-xs text-white/35 mb-8">
+          This browser page shares GPS only. For consented GPS and Bluetooth beacon tracking, use MCET Location Monitor on Android.
+        </p>
 
         {!visitor ? (
           <form onSubmit={handleSubmit} className="border border-white/10 bg-[#0D1521] p-6 space-y-5">
@@ -282,6 +186,18 @@ export default function VisitorCheckIn() {
             <Field label="Purpose of Visit" name="purpose" value={form.purpose} onChange={handleChange}
               error={errors.purpose} placeholder="Guest lecture, project review, etc." />
 
+            <label className="flex items-start gap-2 text-xs text-white/55">
+              <input
+                type="checkbox"
+                checked={smsConsent}
+                onChange={(event) => {
+                  setSmsConsent(event.target.checked)
+                  setErrors((current) => ({ ...current, smsConsent: undefined }))
+                }}
+                className="mt-0.5"
+              />
+              <span>Send me an SMS at this number if GPS tracking detects that I enter a restricted area. This is optional.</span>
+            </label>
             <button type="submit" disabled={submitting} className="btn-primary w-full mt-2">
               {submitting ? <Loader2 size={16} className="animate-spin" /> : null}
               {submitting ? 'Submitting…' : 'Check In'}
@@ -349,46 +265,8 @@ export default function VisitorCheckIn() {
               )}
             </div>
 
-            <div className="border-t border-white/10 pt-5 text-left">
-              <p className="text-sm text-white/70 flex items-center gap-2">
-                <Bluetooth size={16} className={bluetoothStatus === 'connected' ? 'text-signal-green' : 'text-brass-300'} />
-                Optional Bluetooth device sharing
-              </p>
-              <p className="text-xs text-white/40 mt-2">
-                Choose and connect to one nearby Bluetooth device. Its name and connection status will be visible to authorized campus admins alongside your GPS location. This does not scan or report other nearby devices.
-              </p>
-              {bluetoothDeviceName && (
-                <p className="text-xs text-signal-green mt-3">
-                  Connected device: {bluetoothDeviceName}
-                </p>
-              )}
-              {bluetoothStatus === 'disconnected' && (
-                <p className="text-xs text-signal-amber mt-2">Bluetooth device disconnected. Its live status has been cleared.</p>
-              )}
-              {bluetoothError && (
-                <p role="alert" className="text-xs text-signal-red mt-2">{bluetoothError}</p>
-              )}
-              {bluetoothStatus === 'connected' ? (
-                <button onClick={stopBluetoothSharing} className="btn-ghost w-full mt-3 text-xs">
-                  <BluetoothOff size={14} /> Stop Bluetooth sharing
-                </button>
-              ) : (
-                <button
-                  onClick={startBluetoothSharing}
-                  disabled={bluetoothStatus === 'selecting'}
-                  className="btn-ghost w-full mt-3 text-xs"
-                >
-                  {bluetoothStatus === 'selecting' ? <Loader2 size={14} className="animate-spin" /> : <Bluetooth size={14} />}
-                  {bluetoothStatus === 'selecting' ? 'Choose a device…' : 'Choose Bluetooth device'}
-                </button>
-              )}
-              <p className="text-[11px] text-white/30 mt-2">
-                Bluetooth is optional. Continue with GPS if your browser or device does not support it.
-              </p>
-            </div>
-
             <p className="text-[11px] text-white/30">
-              Keep this page open while sharing; mobile browsers may pause location tracking in the background. Please check out at the gate before you leave.
+              For background GPS and Bluetooth visitor-beacon monitoring, use the MCET Location Monitor Android app. Browser tracking can pause when this page is backgrounded.
             </p>
           </div>
         )}

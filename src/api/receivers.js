@@ -19,5 +19,3 @@ function receiverRequest(method, path, payload) {
 
 export const getReceiver = () => receiverRequest('get', '/receivers/me')
 export const receiverHeartbeat = () => receiverRequest('post', '/receivers/heartbeat')
-export const reportBluetoothDetection = (visitor_id) =>
-  receiverRequest('post', '/receivers/bluetooth-detections', { visitor_id })
