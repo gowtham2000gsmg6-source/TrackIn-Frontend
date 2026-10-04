@@ -1,7 +1,18 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, Circle, CircleMarker, useMap } from 'react-leaflet'
 import L from 'leaflet'
-import { Bluetooth, BluetoothOff, MapPin, Loader2, RefreshCw, Wifi, WifiOff } from 'lucide-react'
+import {
+  Bluetooth,
+  Clock3,
+  MapPin,
+  Loader2,
+  RefreshCw,
+  ShieldAlert,
+  ShieldCheck,
+  Users,
+  Wifi,
+  WifiOff,
+} from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getLiveAll, getLocationReceivers, getVisitorLocationLogs } from '../api/visitors'
 import { apiErrorMessage, parseApiTimestamp } from '../api/client'
@@ -25,6 +36,13 @@ const defaultIcon = L.icon({
   shadowSize: [41, 41],
 })
 L.Marker.prototype.options.icon = defaultIcon
+const visitorIcon = L.divIcon({
+  className: 'visitor-map-pin',
+  html: '<span><i></i></span>',
+  iconSize: [36, 36],
+  iconAnchor: [18, 18],
+  popupAnchor: [0, -18],
+})
 
 // Fallback centre: MCET campus (used until we have any live GPS fix).
 const DEFAULT_CENTER = [10.5983, 77.0270]
@@ -59,6 +77,7 @@ export default function MapPage() {
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState(null)
+  const [lastRefresh, setLastRefresh] = useState(null)
   const markerRefs = React.useRef({})
 
   const load = useCallback(async () => {
@@ -71,6 +90,7 @@ export default function MapPage() {
       setVisitors(live)
       setReceivers(anchors)
       setLogs(entries)
+      setLastRefresh(new Date())
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Could not load live locations'))
     } finally {
@@ -90,6 +110,10 @@ export default function MapPage() {
     ...located.map((v) => [v.last_latitude, v.last_longitude]),
     ...receivers.filter((r) => r.status === 'active').map((r) => [r.latitude, r.longitude]),
   ]
+  const activeReceivers = receivers.filter((receiver) => receiver.status === 'active')
+  const restrictedReceivers = activeReceivers.filter((receiver) => receiver.is_restricted)
+  const restrictedReceiverIds = new Set(restrictedReceivers.map((receiver) => receiver.id))
+  const restrictedEntries = logs.filter((log) => restrictedReceiverIds.has(log.receiver_id))
   const selected = located.find((v) => v.visitor_id === selectedId) || null
 
   const handleSelect = (visitorId) => {
@@ -115,24 +139,49 @@ export default function MapPage() {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="space-y-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="font-display text-2xl text-brass-50 flex items-center gap-2">
-            <MapPin size={20} className="text-brass-400" strokeWidth={1.75} />
-            Visitor Map
+          <p className="text-[11px] uppercase tracking-[0.22em] text-brass-400/80">Campus monitoring</p>
+          <h1 className="font-display text-3xl text-brass-50 flex items-center gap-3 mt-1">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-brass-400/20 bg-brass-400/10">
+              <MapPin size={21} className="text-brass-300" strokeWidth={1.75} />
+            </span>
+            Live visitor map
           </h1>
-          <p className="text-sm text-white/40 mt-1">
-            Live positions from visitors who turned on location after scanning the gate QR code.
+          <p className="text-sm text-white/45 mt-2">
+            GPS positions, receiver geofences, and proximity activity in one view.
           </p>
         </div>
-        <button onClick={load} className="btn-ghost text-xs">
-          <RefreshCw size={14} /> Refresh
+        <button onClick={load} className="btn-ghost text-xs self-start sm:self-auto">
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh map
         </button>
       </div>
 
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        {[
+          { label: 'Sharing GPS', value: located.length, detail: `${notLocated.length} without a fix`, icon: Users, color: 'text-sky-300', tint: 'bg-sky-400/10' },
+          { label: 'Active receivers', value: activeReceivers.length, detail: 'Live geofence anchors', icon: MapPin, color: 'text-emerald-300', tint: 'bg-emerald-400/10' },
+          { label: 'Restricted zones', value: restrictedReceivers.length, detail: 'Red geofence boundaries', icon: ShieldAlert, color: 'text-rose-300', tint: 'bg-rose-400/10' },
+          { label: 'Restricted entries', value: restrictedEntries.length, detail: 'Recent proximity events', icon: ShieldCheck, color: 'text-amber-300', tint: 'bg-amber-400/10' },
+        ].map(({ label, value, detail, icon: Icon, color, tint }) => (
+          <div key={label} className="rounded-xl border border-white/[0.09] bg-white/[0.025] p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-xs text-white/45">{label}</p>
+                <p className="mt-2 text-2xl font-semibold tabular-nums text-brass-50">{value}</p>
+              </div>
+              <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${tint} ${color}`}>
+                <Icon size={17} />
+              </span>
+            </div>
+            <p className="mt-2 text-[11px] text-white/35">{detail}</p>
+          </div>
+        ))}
+      </div>
+
       {selected && (
-        <div className="flex items-center justify-between border border-brass-400/30 bg-brass-400/5 px-4 py-2.5 mb-4 text-sm">
+        <div className="flex items-center justify-between rounded-lg border border-brass-400/30 bg-brass-400/5 px-4 py-3 text-sm">
           <span className="text-brass-200">
             Focused on <span className="text-brass-50">{selected.full_name}</span>
             <span className="text-white/40 font-mono ml-2 text-xs">{selected.visitor_id}</span>
@@ -143,11 +192,22 @@ export default function MapPage() {
         </div>
       )}
 
-      <div className="border border-white/10 overflow-hidden mb-6" style={{ height: 480 }}>
+      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-2xl shadow-black/20">
+        <div className="absolute left-3 top-3 z-[1000] flex flex-wrap gap-2">
+          <span className="flex items-center gap-2 rounded-lg border border-slate-900/10 bg-white/95 px-3 py-2 text-[11px] font-medium text-slate-700 shadow-lg">
+            <i className="h-2.5 w-2.5 rounded-full bg-sky-500" /> Visitor
+          </span>
+          <span className="flex items-center gap-2 rounded-lg border border-slate-900/10 bg-white/95 px-3 py-2 text-[11px] font-medium text-slate-700 shadow-lg">
+            <i className="h-2.5 w-2.5 rounded-full bg-rose-500" /> Restricted
+          </span>
+          <span className="flex items-center gap-2 rounded-lg border border-slate-900/10 bg-white/95 px-3 py-2 text-[11px] font-medium text-slate-700 shadow-lg">
+            <i className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Unrestricted
+          </span>
+        </div>
         <MapContainer
           center={DEFAULT_CENTER}
           zoom={DEFAULT_ZOOM}
-          style={{ height: '100%', width: '100%' }}
+          style={{ height: 'min(68vh, 620px)', minHeight: 430, width: '100%' }}
         >
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -159,6 +219,7 @@ export default function MapPage() {
             <Marker
               key={v.visitor_id}
               position={[v.last_latitude, v.last_longitude]}
+              icon={visitorIcon}
               ref={(el) => {
                 if (el) markerRefs.current[v.visitor_id] = el
               }}
@@ -183,7 +244,7 @@ export default function MapPage() {
               </Popup>
             </Marker>
           ))}
-          {receivers.filter((receiver) => receiver.status === 'active').map((receiver) => {
+          {activeReceivers.map((receiver) => {
             const color = receiver.is_restricted ? '#ef4444' : '#22c55e'
             return (
               <React.Fragment key={`receiver-${receiver.id}`}>
@@ -211,34 +272,55 @@ export default function MapPage() {
             )
           })}
         </MapContainer>
+        <div className="flex flex-col gap-1 border-t border-white/[0.08] bg-slate-900/95 px-4 py-3 text-[11px] text-white/40 sm:flex-row sm:items-center sm:justify-between">
+          <span>Open a marker for visitor or receiver details. Use the list below to focus a visitor.</span>
+          <span className="flex items-center gap-1.5">
+            <Clock3 size={12} />
+            {lastRefresh ? `Updated ${lastRefresh.toLocaleTimeString()}` : 'Waiting for live data'}
+            <span className="ml-1 h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            Refreshes every 10 seconds
+          </span>
+        </div>
       </div>
 
-      <div className="border border-white/10 mb-6">
-        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-          <h2 className="text-sm text-brass-50">Active receiver anchors ({receivers.filter((r) => r.status === 'active').length})</h2>
-          <div className="flex gap-3 text-[11px] text-white/45">
-            <span className="text-signal-red">Restricted</span>
-            <span className="text-signal-green">Unrestricted</span>
+      <div className="rounded-xl border border-white/10 bg-white/[0.02]">
+        <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+          <div>
+            <h2 className="text-sm font-medium text-brass-50">Active receiver anchors</h2>
+            <p className="mt-1 text-xs text-white/35">Geofence radius and area classification</p>
           </div>
+          <span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-xs text-white/60">{activeReceivers.length} active</span>
         </div>
-        <div className="grid sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-white/10">
-          {receivers.filter((r) => r.status === 'active').map((receiver) => (
-            <div key={receiver.id} className="px-4 py-3">
-              <p className={`text-sm ${receiver.is_restricted ? 'text-signal-red' : 'text-signal-green'}`}>
-                {receiver.name} · {receiver.is_restricted ? 'Restricted' : 'Unrestricted'}
-              </p>
-              <p className="text-xs text-white/40 mt-1">{receiver.radius_m} m geofence · Receiver #{receiver.id}</p>
+        <div className="grid gap-3 p-3 sm:grid-cols-2 xl:grid-cols-3">
+          {activeReceivers.map((receiver) => (
+            <div key={receiver.id} className={`rounded-lg border p-4 ${receiver.is_restricted ? 'border-rose-400/20 bg-rose-400/[0.045]' : 'border-emerald-400/15 bg-emerald-400/[0.035]'}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${receiver.is_restricted ? 'bg-rose-400/10 text-rose-300' : 'bg-emerald-400/10 text-emerald-300'}`}>
+                    {receiver.is_restricted ? <ShieldAlert size={17} /> : <ShieldCheck size={17} />}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-brass-50">{receiver.name}</p>
+                    <p className={`mt-0.5 text-[11px] ${receiver.is_restricted ? 'text-rose-300' : 'text-emerald-300'}`}>
+                      {receiver.is_restricted ? 'Restricted zone' : 'Unrestricted zone'}
+                    </p>
+                  </div>
+                </div>
+                <span className="shrink-0 rounded-full bg-white/[0.06] px-2 py-1 text-[10px] text-white/55">#{receiver.id}</span>
+              </div>
+              <p className="mt-3 text-xs text-white/45">{receiver.radius_m} m radius geofence</p>
+              <p className="mt-1 text-[11px] text-white/30">{receiver.latitude.toFixed(5)}, {receiver.longitude.toFixed(5)}</p>
             </div>
           ))}
-          {!receivers.some((r) => r.status === 'active') && (
+          {!activeReceivers.length && (
             <p className="px-4 py-5 text-sm text-white/35">No active receiver anchors. Configure them under Location Receivers.</p>
           )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="border border-white/10">
-          <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2 text-brass-50">
+        <div className="rounded-xl border border-white/10 bg-white/[0.02]">
+          <div className="flex items-center gap-2 border-b border-white/10 px-4 py-4 text-brass-50">
             <Wifi size={15} className="text-signal-green" />
             <h2 className="text-sm">Sharing location ({located.length})</h2>
           </div>
@@ -270,8 +352,8 @@ export default function MapPage() {
           </div>
         </div>
 
-          <div className="border border-white/10">
-          <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2 text-brass-50">
+        <div className="rounded-xl border border-white/10 bg-white/[0.02]">
+          <div className="flex items-center gap-2 border-b border-white/10 px-4 py-4 text-brass-50">
             <WifiOff size={15} className="text-white/40" />
             <h2 className="text-sm">Location not on ({notLocated.length})</h2>
           </div>
@@ -296,10 +378,13 @@ export default function MapPage() {
         </div>
       </div>
 
-      <div className="border border-white/10 mt-6">
-        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-          <h2 className="text-sm">Recent receiver proximity entries</h2>
-          <span className="text-[11px] text-white/35">GPS geofence transitions and receiver BLE reports</span>
+      <div className="rounded-xl border border-white/10 bg-white/[0.02]">
+        <div className="flex flex-col gap-1 border-b border-white/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-medium">Recent receiver proximity entries</h2>
+            <p className="mt-1 text-xs text-white/35">GPS geofence transitions and receiver BLE reports</p>
+          </div>
+          <span className="text-xs text-white/40">{logs.length} recent events</span>
         </div>
         <div className="divide-y divide-white/10">
           {logs.length ? logs.slice(0, 20).map((log) => {
@@ -308,7 +393,10 @@ export default function MapPage() {
               <div key={log.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
                 <div>
                   <p className="text-sm text-brass-50">{visitor?.full_name || log.visitor_id} <span className="font-mono text-xs text-white/40">{log.visitor_id}</span></p>
-                  <p className="text-xs text-white/45 mt-1">{log.receiver_name} · {log.detected_via} · {log.distance_m == null ? 'distance unavailable' : `${log.distance_m} m`}</p>
+                  <p className="mt-1 text-xs text-white/45">
+                    {log.receiver_name} · {log.detected_via} · {log.distance_m == null ? 'distance unavailable' : `${log.distance_m} m`}
+                    {restrictedReceiverIds.has(log.receiver_id) && <span className="ml-2 text-rose-300">Restricted area</span>}
+                  </p>
                 </div>
                 <time className="text-xs text-white/40">{parseApiTimestamp(log.timestamp).toLocaleString()}</time>
               </div>

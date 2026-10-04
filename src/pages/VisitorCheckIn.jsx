@@ -38,6 +38,7 @@ export default function VisitorCheckIn() {
   const pendingPositionRef = useRef(null)
   const sendingLocationRef = useRef(false)
   const trackingEndedRef = useRef(false)
+  const lastUploadErrorAtRef = useRef(0)
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -91,6 +92,15 @@ export default function VisitorCheckIn() {
       return
     }
     setLocationStatus('requesting')
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then((permission) => {
+        if (permission === 'denied') {
+          toast('Browser notifications are off. Keep this page open to see restricted-area warnings.')
+        }
+      }).catch(() => {
+        toast('Browser notifications are unavailable. Keep this page open to see restricted-area warnings.')
+      })
+    }
 
     const send = async (position) => {
       if (trackingEndedRef.current) return
@@ -112,6 +122,17 @@ export default function VisitorCheckIn() {
             })
             update.restricted_area_entries?.forEach((entry) => {
               toast.error(`Restricted area alert: you are entering ${entry.receiver_name}.`)
+              if ('Notification' in window && Notification.permission === 'granted') {
+                try {
+                  const notification = new Notification('Restricted area warning', {
+                    body: `You are entering ${entry.receiver_name}. Please leave the area.`,
+                    tag: `restricted-area-${entry.receiver_id}`,
+                  })
+                  notification.onclick = () => window.focus()
+                } catch (notificationError) {
+                  console.warn('Could not display the browser restricted-area notification.', notificationError)
+                }
+              }
             })
             setLocationStatus('sharing')
             setLastSent(new Date())
@@ -126,8 +147,12 @@ export default function VisitorCheckIn() {
               setLocationStatus('ended')
               break
             }
-            // Don't spam toasts on every watch tick — surface once via state.
             setLocationStatus('error')
+            const now = Date.now()
+            if (now - lastUploadErrorAtRef.current > 30_000) {
+              lastUploadErrorAtRef.current = now
+              toast.error(apiErrorMessage(err, 'Could not send your location. Check your connection.'))
+            }
           }
         }
       } finally {
@@ -196,7 +221,7 @@ export default function VisitorCheckIn() {
                 }}
                 className="mt-0.5"
               />
-              <span>Send me an SMS at this number if GPS tracking detects that I enter a restricted area. This is optional.</span>
+              <span>Send me an SMS at this number if GPS or a receiver detects me near a restricted area. This is optional.</span>
             </label>
             <button type="submit" disabled={submitting} className="btn-primary w-full mt-2">
               {submitting ? <Loader2 size={16} className="animate-spin" /> : null}

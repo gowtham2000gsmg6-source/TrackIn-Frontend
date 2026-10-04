@@ -29,3 +29,26 @@
       hover:border-white/40 text-brass-50 px-4 py-2.5 text-sm transition-colors;
   }
 }
+
+.visitor-map-pin {
+  background: transparent;
+  border: 0;
+}
+
+.visitor-map-pin span {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: #0284c7;
+  box-shadow: 0 2px 12px rgb(2 8 23 / 35%);
+}
+
+.visitor-map-pin i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fff;
+}
