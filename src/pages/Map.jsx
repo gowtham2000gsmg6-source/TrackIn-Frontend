@@ -48,17 +48,20 @@ const visitorIcon = L.divIcon({
 const DEFAULT_CENTER = [10.5983, 77.0270]
 const DEFAULT_ZOOM = 16
 
-function FitToMarkers({ points, selected }) {
+function FitToMarkers({ points, fitRequest }) {
   const map = useMap()
+  const lastFitRequest = React.useRef(fitRequest)
+
   useEffect(() => {
-    if (selected) return // selection handles its own framing
+    if (fitRequest === lastFitRequest.current) return
+    lastFitRequest.current = fitRequest
     if (!points.length) return
     if (points.length === 1) {
-      map.setView(points[0], 17)
+      map.setView(points[0], DEFAULT_ZOOM)
     } else {
-      map.fitBounds(points, { padding: [40, 40], maxZoom: 18 })
+      map.fitBounds(points, { padding: [48, 48], maxZoom: 17 })
     }
-  }, [points, map, selected])
+  }, [fitRequest, map, points])
   return null
 }
 
@@ -67,7 +70,7 @@ function FlyToSelected({ selected }) {
   useEffect(() => {
     if (!selected) return
     map.flyTo([selected.last_latitude, selected.last_longitude], 19, { duration: 0.75 })
-  }, [selected, map])
+  }, [selected?.visitor_id, map])
   return null
 }
 
@@ -78,6 +81,7 @@ export default function MapPage() {
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState(null)
   const [lastRefresh, setLastRefresh] = useState(null)
+  const [fitRequest, setFitRequest] = useState(0)
   const markerRefs = React.useRef({})
 
   const load = useCallback(async () => {
@@ -153,9 +157,18 @@ export default function MapPage() {
             GPS positions, receiver geofences, and proximity activity in one view.
           </p>
         </div>
-        <button onClick={load} className="btn-ghost text-xs self-start sm:self-auto">
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh map
-        </button>
+        <div className="flex gap-2 self-start sm:self-auto">
+          <button
+            onClick={() => setFitRequest((request) => request + 1)}
+            disabled={!points.length}
+            className="btn-ghost text-xs disabled:opacity-40"
+          >
+            <MapPin size={14} /> Fit all
+          </button>
+          <button onClick={load} className="btn-ghost text-xs">
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
@@ -213,7 +226,7 @@ export default function MapPage() {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          <FitToMarkers points={points} selected={selected} />
+          <FitToMarkers points={points} fitRequest={fitRequest} />
           <FlyToSelected selected={selected} />
           {located.map((v) => (
             <Marker
