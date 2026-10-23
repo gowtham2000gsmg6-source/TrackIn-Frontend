@@ -233,6 +233,9 @@ export default function MapPage() {
           <span className="flex items-center gap-2 rounded-lg border border-slate-900/10 bg-white/95 px-3 py-2 text-[11px] font-medium text-slate-700 shadow-lg">
             <i className="h-2.5 w-2.5 rounded-full border border-sky-500 bg-sky-500/20" /> GPS accuracy
           </span>
+          <span className="flex items-center gap-2 rounded-lg border border-slate-900/10 bg-white/95 px-3 py-2 text-[11px] font-medium text-slate-700 shadow-lg">
+            <i className="h-2.5 w-2.5 rounded-full border-2 border-violet-500" /> BLE receiver detection
+          </span>
         </div>
         <div className="absolute right-3 top-3 z-[1000]">
           <button
@@ -312,6 +315,11 @@ export default function MapPage() {
           ))}
           {activeReceivers.map((receiver) => {
             const color = receiver.is_restricted ? '#ef4444' : '#22c55e'
+            const bleVisitors = visitors.flatMap((visitor) =>
+              (visitor.nearby_bluetooth || [])
+                .filter((device) => device.receiver_id === receiver.id)
+                .map((device) => ({ visitor, device })),
+            )
             return (
               <React.Fragment key={`receiver-${receiver.id}`}>
                 <Circle
@@ -319,6 +327,14 @@ export default function MapPage() {
                   radius={receiver.radius_m}
                   pathOptions={{ color, fillColor: color, fillOpacity: 0.12, weight: 2 }}
                 />
+                {bleVisitors.length > 0 && (
+                  <CircleMarker
+                    center={[receiver.latitude, receiver.longitude]}
+                    radius={16}
+                    pathOptions={{ color: '#8b5cf6', fillOpacity: 0, weight: 3 }}
+                    interactive={false}
+                  />
+                )}
                 <CircleMarker
                   center={[receiver.latitude, receiver.longitude]}
                   radius={8}
@@ -331,6 +347,20 @@ export default function MapPage() {
                       <p className="text-[11px] text-slate-500">
                         {receiver.latitude.toFixed(6)}, {receiver.longitude.toFixed(6)}
                       </p>
+                      {bleVisitors.length > 0 ? (
+                        <div className="mt-2 border-t border-slate-200 pt-2">
+                          <p className="text-xs font-semibold text-violet-700">
+                            BLE detected nearby ({bleVisitors.length})
+                          </p>
+                          {bleVisitors.map(({ visitor, device }) => (
+                            <p key={visitor.visitor_id} className="mt-1 text-xs text-slate-600">
+                              {visitor.full_name} · {device.rssi} dBm
+                            </p>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-xs text-slate-500">No recent BLE visitor detection</p>
+                      )}
                     </div>
                   </Popup>
                 </CircleMarker>
@@ -339,7 +369,7 @@ export default function MapPage() {
           })}
         </MapContainer>
         <div className="flex flex-col gap-1 border-t border-white/[0.08] bg-slate-900/95 px-4 py-3 text-[11px] text-white/40 sm:flex-row sm:items-center sm:justify-between">
-          <span>Blue circles show the reported GPS uncertainty radius; smaller circles indicate a more precise fix.</span>
+          <span>Blue circles show reported GPS uncertainty. A purple receiver ring means BLE detected a participating visitor nearby; it is not an exact GPS position.</span>
           <span className="flex items-center gap-1.5">
             <Clock3 size={12} />
             {lastRefresh ? `Updated ${lastRefresh.toLocaleTimeString()}` : 'Waiting for live data'}
