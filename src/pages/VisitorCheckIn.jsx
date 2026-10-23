@@ -166,13 +166,13 @@ export default function VisitorCheckIn() {
         setLocationStatus('denied')
         toast.error('Location permission denied. The gate cannot see you on the map without it.')
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
     )
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       send,
       () => setLocationStatus((s) => (s === 'sharing' ? s : 'denied')),
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
     )
   }
 

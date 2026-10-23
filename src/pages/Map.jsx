@@ -4,6 +4,7 @@ import L from 'leaflet'
 import {
   Bluetooth,
   Clock3,
+  Layers,
   MapPin,
   Loader2,
   RefreshCw,
@@ -47,6 +48,18 @@ const visitorIcon = L.divIcon({
 // Fallback centre: MCET campus (used until we have any live GPS fix).
 const DEFAULT_CENTER = [10.5983, 77.0270]
 const DEFAULT_ZOOM = 16
+const STREET_TILES = {
+  url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+}
+const SATELLITE_TILES = {
+  url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+}
+const SATELLITE_LABEL_TILES = {
+  url: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+  attribution: 'Labels &copy; Esri',
+}
 
 function FitToMarkers({ points, fitRequest }) {
   const map = useMap()
@@ -82,6 +95,7 @@ export default function MapPage() {
   const [selectedId, setSelectedId] = useState(null)
   const [lastRefresh, setLastRefresh] = useState(null)
   const [fitRequest, setFitRequest] = useState(0)
+  const [mapStyle, setMapStyle] = useState('satellite')
   const markerRefs = React.useRef({})
 
   const load = useCallback(async () => {
@@ -216,6 +230,20 @@ export default function MapPage() {
           <span className="flex items-center gap-2 rounded-lg border border-slate-900/10 bg-white/95 px-3 py-2 text-[11px] font-medium text-slate-700 shadow-lg">
             <i className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Unrestricted
           </span>
+          <span className="flex items-center gap-2 rounded-lg border border-slate-900/10 bg-white/95 px-3 py-2 text-[11px] font-medium text-slate-700 shadow-lg">
+            <i className="h-2.5 w-2.5 rounded-full border border-sky-500 bg-sky-500/20" /> GPS accuracy
+          </span>
+        </div>
+        <div className="absolute right-3 top-3 z-[1000]">
+          <button
+            type="button"
+            onClick={() => setMapStyle((style) => style === 'satellite' ? 'street' : 'satellite')}
+            className="flex items-center gap-2 rounded-lg border border-slate-900/10 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow-lg hover:bg-white"
+            aria-label={`Switch to ${mapStyle === 'satellite' ? 'street' : 'satellite'} map`}
+          >
+            <Layers size={15} />
+            {mapStyle === 'satellite' ? 'Satellite' : 'Street'}
+          </button>
         </div>
         <MapContainer
           center={DEFAULT_CENTER}
@@ -223,39 +251,64 @@ export default function MapPage() {
           style={{ height: 'min(68vh, 620px)', minHeight: 430, width: '100%' }}
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            key={mapStyle}
+            attribution={mapStyle === 'satellite' ? SATELLITE_TILES.attribution : STREET_TILES.attribution}
+            url={mapStyle === 'satellite' ? SATELLITE_TILES.url : STREET_TILES.url}
           />
+          {mapStyle === 'satellite' && (
+            <TileLayer
+              attribution={SATELLITE_LABEL_TILES.attribution}
+              url={SATELLITE_LABEL_TILES.url}
+              opacity={0.9}
+            />
+          )}
           <FitToMarkers points={points} fitRequest={fitRequest} />
           <FlyToSelected selected={selected} />
           {located.map((v) => (
-            <Marker
-              key={v.visitor_id}
-              position={[v.last_latitude, v.last_longitude]}
-              icon={visitorIcon}
-              ref={(el) => {
-                if (el) markerRefs.current[v.visitor_id] = el
-              }}
-              eventHandlers={{ click: () => setSelectedId(v.visitor_id) }}
-            >
-              <Popup>
-                <div className="text-sm">
-                  <p className="font-semibold">{v.full_name}</p>
-                  <p className="text-xs text-slate-500">{v.visitor_id} · {v.department}</p>
-                  <p className="text-xs mt-1">{v.purpose}</p>
-                  {v.nearby_bluetooth?.map((device) => (
-                    <p key={device.receiver_id} className="text-xs mt-2 text-emerald-700">
-                      BLE near {device.receiver_name} · {device.rssi} dBm
-                    </p>
-                  ))}
-                  {v.last_updated && (
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      updated {parseApiTimestamp(v.last_updated).toLocaleTimeString()}
-                    </p>
-                  )}
-                </div>
-              </Popup>
-            </Marker>
+            <React.Fragment key={v.visitor_id}>
+              {v.last_accuracy > 0 && (
+                <Circle
+                  center={[v.last_latitude, v.last_longitude]}
+                  radius={v.last_accuracy}
+                  pathOptions={{
+                    color: '#38bdf8',
+                    fillColor: '#38bdf8',
+                    fillOpacity: 0.14,
+                    weight: 1,
+                    dashArray: '4 5',
+                  }}
+                />
+              )}
+              <Marker
+                position={[v.last_latitude, v.last_longitude]}
+                icon={visitorIcon}
+                ref={(el) => {
+                  if (el) markerRefs.current[v.visitor_id] = el
+                }}
+                eventHandlers={{ click: () => setSelectedId(v.visitor_id) }}
+              >
+                <Popup>
+                  <div className="text-sm">
+                    <p className="font-semibold">{v.full_name}</p>
+                    <p className="text-xs text-slate-500">{v.visitor_id} · {v.department}</p>
+                    <p className="text-xs mt-1">{v.purpose}</p>
+                    {v.last_accuracy != null && (
+                      <p className="text-xs mt-2 text-sky-700">GPS accuracy: approximately ±{Math.round(v.last_accuracy)} m</p>
+                    )}
+                    {v.nearby_bluetooth?.map((device) => (
+                      <p key={device.receiver_id} className="text-xs mt-2 text-emerald-700">
+                        BLE near {device.receiver_name} · {device.rssi} dBm
+                      </p>
+                    ))}
+                    {v.last_updated && (
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        updated {parseApiTimestamp(v.last_updated).toLocaleTimeString()}
+                      </p>
+                    )}
+                  </div>
+                </Popup>
+              </Marker>
+            </React.Fragment>
           ))}
           {activeReceivers.map((receiver) => {
             const color = receiver.is_restricted ? '#ef4444' : '#22c55e'
@@ -286,7 +339,7 @@ export default function MapPage() {
           })}
         </MapContainer>
         <div className="flex flex-col gap-1 border-t border-white/[0.08] bg-slate-900/95 px-4 py-3 text-[11px] text-white/40 sm:flex-row sm:items-center sm:justify-between">
-          <span>Open a marker for visitor or receiver details. Use the list below to focus a visitor.</span>
+          <span>Blue circles show the reported GPS uncertainty radius; smaller circles indicate a more precise fix.</span>
           <span className="flex items-center gap-1.5">
             <Clock3 size={12} />
             {lastRefresh ? `Updated ${lastRefresh.toLocaleTimeString()}` : 'Waiting for live data'}
