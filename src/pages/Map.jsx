@@ -133,6 +133,33 @@ export default function MapPage() {
   const restrictedReceiverIds = new Set(restrictedReceivers.map((receiver) => receiver.id))
   const restrictedEntries = logs.filter((log) => restrictedReceiverIds.has(log.receiver_id))
   const selected = located.find((v) => v.visitor_id === selectedId) || null
+  const receiverById = Object.fromEntries(activeReceivers.map((receiver) => [receiver.id, receiver]))
+
+  const getVisitorMapPosition = (visitor) => {
+    if (!visitor?.nearby_bluetooth?.length) {
+      return {
+        position: [visitor.last_latitude, visitor.last_longitude],
+        verifiedByBle: false,
+      }
+    }
+    const strongestBle = visitor.nearby_bluetooth.reduce((best, current) => {
+      if (!best || current.rssi > best.rssi) return current
+      return best
+    }, null)
+    const receiver = strongestBle ? receiverById[strongestBle.receiver_id] : null
+    if (!receiver) {
+      return {
+        position: [visitor.last_latitude, visitor.last_longitude],
+        verifiedByBle: false,
+      }
+    }
+    return {
+      position: [receiver.latitude, receiver.longitude],
+      verifiedByBle: true,
+      receiverName: receiver.name,
+      rssi: strongestBle.rssi,
+    }
+  }
 
   const handleSelect = (visitorId) => {
     const v = located.find((x) => x.visitor_id === visitorId)
@@ -267,52 +294,59 @@ export default function MapPage() {
           )}
           <FitToMarkers points={points} fitRequest={fitRequest} />
           <FlyToSelected selected={selected} />
-          {located.map((v) => (
-            <React.Fragment key={v.visitor_id}>
-              {v.last_accuracy > 0 && (
-                <Circle
-                  center={[v.last_latitude, v.last_longitude]}
-                  radius={v.last_accuracy}
-                  pathOptions={{
-                    color: '#38bdf8',
-                    fillColor: '#38bdf8',
-                    fillOpacity: 0.14,
-                    weight: 1,
-                    dashArray: '4 5',
+          {located.map((v) => {
+            const mapPosition = getVisitorMapPosition(v)
+            return (
+              <React.Fragment key={v.visitor_id}>
+                {v.last_accuracy > 0 && (
+                  <Circle
+                    center={mapPosition.position}
+                    radius={v.last_accuracy}
+                    pathOptions={{
+                      color: mapPosition.verifiedByBle ? '#8b5cf6' : '#38bdf8',
+                      fillColor: mapPosition.verifiedByBle ? '#8b5cf6' : '#38bdf8',
+                      fillOpacity: 0.12,
+                      weight: 1,
+                      dashArray: '4 5',
+                    }}
+                  />
+                )}
+                <Marker
+                  position={mapPosition.position}
+                  icon={visitorIcon}
+                  ref={(el) => {
+                    if (el) markerRefs.current[v.visitor_id] = el
                   }}
-                />
-              )}
-              <Marker
-                position={[v.last_latitude, v.last_longitude]}
-                icon={visitorIcon}
-                ref={(el) => {
-                  if (el) markerRefs.current[v.visitor_id] = el
-                }}
-                eventHandlers={{ click: () => setSelectedId(v.visitor_id) }}
-              >
-                <Popup>
-                  <div className="text-sm">
-                    <p className="font-semibold">{v.full_name}</p>
-                    <p className="text-xs text-slate-500">{v.visitor_id} · {v.department}</p>
-                    <p className="text-xs mt-1">{v.purpose}</p>
-                    {v.last_accuracy != null && (
-                      <p className="text-xs mt-2 text-sky-700">GPS accuracy: approximately ±{Math.round(v.last_accuracy)} m</p>
-                    )}
-                    {v.nearby_bluetooth?.map((device) => (
-                      <p key={device.receiver_id} className="text-xs mt-2 text-emerald-700">
-                        BLE near {device.receiver_name} · {device.rssi} dBm
-                      </p>
-                    ))}
-                    {v.last_updated && (
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        updated {parseApiTimestamp(v.last_updated).toLocaleTimeString()}
-                      </p>
-                    )}
-                  </div>
-                </Popup>
-              </Marker>
-            </React.Fragment>
-          ))}
+                  eventHandlers={{ click: () => setSelectedId(v.visitor_id) }}
+                >
+                  <Popup>
+                    <div className="text-sm">
+                      <p className="font-semibold">{v.full_name}</p>
+                      <p className="text-xs text-slate-500">{v.visitor_id} · {v.department}</p>
+                      <p className="text-xs mt-1">{v.purpose}</p>
+                      {mapPosition.verifiedByBle ? (
+                        <p className="text-xs mt-2 text-violet-700">
+                          BLE verified near {mapPosition.receiverName} · {mapPosition.rssi} dBm
+                        </p>
+                      ) : v.last_accuracy != null ? (
+                        <p className="text-xs mt-2 text-sky-700">GPS accuracy: approximately ±{Math.round(v.last_accuracy)} m</p>
+                      ) : null}
+                      {v.nearby_bluetooth?.map((device) => (
+                        <p key={device.receiver_id} className="text-xs mt-2 text-emerald-700">
+                          BLE near {device.receiver_name} · {device.rssi} dBm
+                        </p>
+                      ))}
+                      {v.last_updated && (
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          updated {parseApiTimestamp(v.last_updated).toLocaleTimeString()}
+                        </p>
+                      )}
+                    </div>
+                  </Popup>
+                </Marker>
+              </React.Fragment>
+            )
+          })}
           {activeReceivers.map((receiver) => {
             const color = receiver.is_restricted ? '#ef4444' : '#22c55e'
             const bleVisitors = visitors.flatMap((visitor) =>
