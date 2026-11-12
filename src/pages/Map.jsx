@@ -80,10 +80,14 @@ function FitToMarkers({ points, fitRequest }) {
 
 function FlyToSelected({ selectedId, position }) {
   const map = useMap()
+  const lastSelectedId = React.useRef(null)
+
   useEffect(() => {
+    if (selectedId === lastSelectedId.current) return
+    lastSelectedId.current = selectedId
     if (!selectedId || !position) return
     map.flyTo(position, 19, { duration: 0.75 })
-  }, [selectedId, position?.[0], position?.[1], map])
+  }, [selectedId, position, map])
   return null
 }
 
