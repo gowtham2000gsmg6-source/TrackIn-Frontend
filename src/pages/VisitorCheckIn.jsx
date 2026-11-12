@@ -3,6 +3,7 @@ import { ShieldCheck, MapPin, Loader2, CheckCircle2, Radio, AlertTriangle } from
 import toast from 'react-hot-toast'
 import { registerVisitor, pushLocation } from '../api/visitors'
 import { apiErrorMessage } from '../api/client'
+import { LocationKalmanFilter } from '../utils/locationKalmanFilter'
 
 const EMPTY = {
   full_name: '',
@@ -39,6 +40,8 @@ export default function VisitorCheckIn() {
   const sendingLocationRef = useRef(false)
   const trackingEndedRef = useRef(false)
   const lastUploadErrorAtRef = useRef(0)
+  const locationFilterRef = useRef(new LocationKalmanFilter())
+  const lastSeenPositionTimestampRef = useRef(0)
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -92,6 +95,13 @@ export default function VisitorCheckIn() {
       return
     }
     setLocationStatus('requesting')
+    trackingEndedRef.current = false
+    locationFilterRef.current.reset()
+    lastSeenPositionTimestampRef.current = 0
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current)
+      watchIdRef.current = null
+    }
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().then((permission) => {
         if (permission === 'denied') {
@@ -104,6 +114,8 @@ export default function VisitorCheckIn() {
 
     const send = async (position) => {
       if (trackingEndedRef.current) return
+      if (position.timestamp <= lastSeenPositionTimestampRef.current) return
+      lastSeenPositionTimestampRef.current = position.timestamp
       pendingPositionRef.current = position
       if (sendingLocationRef.current) return
       sendingLocationRef.current = true
@@ -111,12 +123,15 @@ export default function VisitorCheckIn() {
         while (pendingPositionRef.current && !trackingEndedRef.current) {
           const nextPosition = pendingPositionRef.current
           pendingPositionRef.current = null
-          const { latitude, longitude, accuracy, speed, heading } = nextPosition.coords
+          const filtered = locationFilterRef.current.update(nextPosition)
+          if (!filtered) {
+            setLocationStatus('waiting_accuracy')
+            continue
+          }
+          const { speed, heading } = nextPosition.coords
           try {
             const update = await pushLocation(visitor.access_token, {
-              latitude,
-              longitude,
-              accuracy,
+              ...filtered,
               speed: speed ?? undefined,
               heading: heading ?? undefined,
             })
@@ -160,19 +175,13 @@ export default function VisitorCheckIn() {
       }
     }
 
-    navigator.geolocation.getCurrentPosition(
-      send,
-      () => {
-        setLocationStatus('denied')
-        toast.error('Location permission denied. The gate cannot see you on the map without it.')
-      },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
-    )
-
     watchIdRef.current = navigator.geolocation.watchPosition(
       send,
-      () => setLocationStatus((s) => (s === 'sharing' ? s : 'denied')),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
+      (error) => {
+        if (error.code === 1) setLocationStatus('denied')
+        else setLocationStatus((status) => status === 'sharing' ? status : 'waiting_accuracy')
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 }
     )
   }
 
@@ -254,6 +263,14 @@ export default function VisitorCheckIn() {
               {locationStatus === 'requesting' && (
                 <p className="text-sm text-white/50 flex items-center justify-center gap-2">
                   <Loader2 size={15} className="animate-spin" /> Requesting location permission…
+                </p>
+              )}
+              {locationStatus === 'waiting_accuracy' && (
+                <p className="text-sm text-signal-amber flex items-start gap-2 text-left">
+                  <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                  <span>
+                    Waiting for a fresh GPS fix with accuracy of 20 m or better. Keep the page open and enable precise location; indoor or weak GPS may not meet this threshold.
+                  </span>
                 </p>
               )}
               {locationStatus === 'sharing' && (
