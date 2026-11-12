@@ -48,6 +48,9 @@ const visitorIcon = L.divIcon({
 // Fallback centre: MCET campus (used until we have any live GPS fix).
 const DEFAULT_CENTER = [10.5983, 77.0270]
 const DEFAULT_ZOOM = 16
+// RSSI-to-distance is only a rough model; this reference needs on-site calibration.
+const BLE_RSSI_AT_ONE_METER = -59
+const BLE_PATH_LOSS_EXPONENT = 2
 const STREET_TILES = {
   url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
@@ -59,6 +62,12 @@ const SATELLITE_TILES = {
 const SATELLITE_LABEL_TILES = {
   url: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
   attribution: 'Labels &copy; Esri',
+}
+
+function estimateBleDistance(rssi) {
+  if (!Number.isFinite(rssi) || rssi < -100 || rssi > -20) return null
+  const distance = 10 ** ((BLE_RSSI_AT_ONE_METER - rssi) / (10 * BLE_PATH_LOSS_EXPONENT))
+  return Number.isFinite(distance) ? distance : null
 }
 
 function FitToMarkers({ points, fitRequest }) {
@@ -129,6 +138,7 @@ export default function MapPage() {
     ...receivers.filter((r) => r.status === 'active').map((r) => [r.latitude, r.longitude]),
   ]
   const activeReceivers = receivers.filter((receiver) => receiver.status === 'active')
+  const receiverById = Object.fromEntries(activeReceivers.map((receiver) => [receiver.id, receiver]))
   const restrictedReceivers = activeReceivers.filter((receiver) => receiver.is_restricted)
   const restrictedReceiverIds = new Set(restrictedReceivers.map((receiver) => receiver.id))
   const restrictedEntries = logs.filter((log) => restrictedReceiverIds.has(log.receiver_id))
@@ -139,10 +149,13 @@ export default function MapPage() {
       if (!best || current.rssi > best.rssi) return current
       return best
     }, null)
+    const bleReceiver = strongestBle ? receiverById[strongestBle.receiver_id] : null
     return {
       // BLE confirms proximity to a receiver; it is not the visitor's location.
       position: [visitor.last_latitude, visitor.last_longitude],
       strongestBle,
+      bleReceiver,
+      estimatedBleDistance: strongestBle ? estimateBleDistance(strongestBle.rssi) : null,
     }
   }
 
@@ -246,7 +259,7 @@ export default function MapPage() {
             <i className="h-2.5 w-2.5 rounded-full border border-sky-500 bg-sky-500/20" /> GPS accuracy
           </span>
           <span className="flex items-center gap-2 rounded-lg border border-slate-900/10 bg-white/95 px-3 py-2 text-[11px] font-medium text-slate-700 shadow-lg">
-            <i className="h-2.5 w-2.5 rounded-full border-2 border-violet-500" /> BLE receiver detection
+            <i className="h-2.5 w-2.5 rounded-full border-2 border-violet-500" /> BLE RSSI distance estimate
           </span>
         </div>
         <div className="absolute right-3 top-3 z-[1000]">
@@ -283,7 +296,7 @@ export default function MapPage() {
             const mapPosition = getVisitorMapPosition(v)
             return (
               <React.Fragment key={v.visitor_id}>
-                {v.last_accuracy > 0 && (
+                {v.last_accuracy > 0 && !mapPosition.strongestBle && (
                   <Circle
                     center={mapPosition.position}
                     radius={v.last_accuracy}
@@ -292,6 +305,19 @@ export default function MapPage() {
                       fillColor: '#38bdf8',
                       fillOpacity: 0.12,
                       weight: 1,
+                      dashArray: '4 5',
+                    }}
+                  />
+                )}
+                {mapPosition.bleReceiver && mapPosition.estimatedBleDistance != null && (
+                  <Circle
+                    center={[mapPosition.bleReceiver.latitude, mapPosition.bleReceiver.longitude]}
+                    radius={mapPosition.estimatedBleDistance}
+                    pathOptions={{
+                      color: '#8b5cf6',
+                      fillColor: '#8b5cf6',
+                      fillOpacity: 0.12,
+                      weight: 2,
                       dashArray: '4 5',
                     }}
                   />
@@ -311,13 +337,22 @@ export default function MapPage() {
                       <p className="text-xs mt-1">{v.purpose}</p>
                       {v.last_accuracy != null ? (
                         <p className="text-xs mt-2 text-sky-700">
-                          GPS position · reported accuracy ±{Math.round(v.last_accuracy)} m
+                          GPS reported accuracy ±{Math.round(v.last_accuracy)} m
+                          {mapPosition.strongestBle ? ' · separate from BLE estimate' : ''}
                         </p>
                       ) : null}
                       {mapPosition.strongestBle && (
-                        <p className="text-xs mt-2 text-violet-700">
-                          BLE proximity confirmed near {mapPosition.strongestBle.receiver_name} · {mapPosition.strongestBle.rssi} dBm; marker remains at GPS coordinates
-                        </p>
+                        <>
+                          <p className="text-xs mt-2 text-violet-700">
+                            BLE detected near {mapPosition.strongestBle.receiver_name} · {mapPosition.strongestBle.rssi} dBm
+                            {mapPosition.estimatedBleDistance != null
+                              ? ` · rough RSSI distance ≈ ${mapPosition.estimatedBleDistance < 10 ? mapPosition.estimatedBleDistance.toFixed(1) : Math.round(mapPosition.estimatedBleDistance)} m`
+                              : ''}
+                          </p>
+                          <p className="text-[11px] mt-1 text-slate-500">
+                            The visitor marker stays at GPS coordinates. BLE distance is an uncalibrated estimate and does not provide direction or guarantee 5–10 m accuracy.
+                          </p>
+                        </>
                       )}
                       {v.nearby_bluetooth?.map((device) => (
                         <p key={device.receiver_id} className="text-xs mt-2 text-emerald-700">
