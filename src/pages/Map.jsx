@@ -133,31 +133,16 @@ export default function MapPage() {
   const restrictedReceiverIds = new Set(restrictedReceivers.map((receiver) => receiver.id))
   const restrictedEntries = logs.filter((log) => restrictedReceiverIds.has(log.receiver_id))
   const selected = located.find((v) => v.visitor_id === selectedId) || null
-  const receiverById = Object.fromEntries(activeReceivers.map((receiver) => [receiver.id, receiver]))
 
   const getVisitorMapPosition = (visitor) => {
-    if (!visitor?.nearby_bluetooth?.length) {
-      return {
-        position: [visitor.last_latitude, visitor.last_longitude],
-        verifiedByBle: false,
-      }
-    }
-    const strongestBle = visitor.nearby_bluetooth.reduce((best, current) => {
+    const strongestBle = visitor.nearby_bluetooth?.reduce((best, current) => {
       if (!best || current.rssi > best.rssi) return current
       return best
     }, null)
-    const receiver = strongestBle ? receiverById[strongestBle.receiver_id] : null
-    if (!receiver) {
-      return {
-        position: [visitor.last_latitude, visitor.last_longitude],
-        verifiedByBle: false,
-      }
-    }
     return {
-      position: [receiver.latitude, receiver.longitude],
-      verifiedByBle: true,
-      receiverName: receiver.name,
-      rssi: strongestBle.rssi,
+      // BLE confirms proximity to a receiver; it is not the visitor's location.
+      position: [visitor.last_latitude, visitor.last_longitude],
+      strongestBle,
     }
   }
 
@@ -303,8 +288,8 @@ export default function MapPage() {
                     center={mapPosition.position}
                     radius={v.last_accuracy}
                     pathOptions={{
-                      color: mapPosition.verifiedByBle ? '#8b5cf6' : '#38bdf8',
-                      fillColor: mapPosition.verifiedByBle ? '#8b5cf6' : '#38bdf8',
+                      color: '#38bdf8',
+                      fillColor: '#38bdf8',
                       fillOpacity: 0.12,
                       weight: 1,
                       dashArray: '4 5',
@@ -324,13 +309,16 @@ export default function MapPage() {
                       <p className="font-semibold">{v.full_name}</p>
                       <p className="text-xs text-slate-500">{v.visitor_id} · {v.department}</p>
                       <p className="text-xs mt-1">{v.purpose}</p>
-                      {mapPosition.verifiedByBle ? (
-                        <p className="text-xs mt-2 text-violet-700">
-                          BLE verified near {mapPosition.receiverName} · {mapPosition.rssi} dBm
+                      {v.last_accuracy != null ? (
+                        <p className="text-xs mt-2 text-sky-700">
+                          GPS position · reported accuracy ±{Math.round(v.last_accuracy)} m
                         </p>
-                      ) : v.last_accuracy != null ? (
-                        <p className="text-xs mt-2 text-sky-700">GPS accuracy: approximately ±{Math.round(v.last_accuracy)} m</p>
                       ) : null}
+                      {mapPosition.strongestBle && (
+                        <p className="text-xs mt-2 text-violet-700">
+                          BLE proximity confirmed near {mapPosition.strongestBle.receiver_name} · {mapPosition.strongestBle.rssi} dBm; marker remains at GPS coordinates
+                        </p>
+                      )}
                       {v.nearby_bluetooth?.map((device) => (
                         <p key={device.receiver_id} className="text-xs mt-2 text-emerald-700">
                           BLE near {device.receiver_name} · {device.rssi} dBm
