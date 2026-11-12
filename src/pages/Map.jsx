@@ -319,6 +319,11 @@ export default function MapPage() {
                           GPS reported accuracy ±{Math.round(v.last_accuracy)} m
                         </p>
                       ) : null}
+                      {v.last_accuracy > 20 && (
+                        <p className="text-[11px] mt-1 text-amber-700">
+                          Approximate fix; GPS geofence checks are paused until accuracy improves to 20 m or better.
+                        </p>
+                      )}
                       {mapPosition.strongestBle && (
                         <p className="text-xs mt-2 text-violet-700">
                           BLE proximity: near {mapPosition.strongestBle.receiver_name} · {mapPosition.strongestBle.rssi} dBm

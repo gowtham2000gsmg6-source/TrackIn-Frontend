@@ -269,7 +269,7 @@ export default function VisitorCheckIn() {
                 <p className="text-sm text-signal-amber flex items-start gap-2 text-left">
                   <AlertTriangle size={15} className="mt-0.5 shrink-0" />
                   <span>
-                    Waiting for a fresh GPS fix with accuracy of 20 m or better. Keep the page open and enable precise location; indoor or weak GPS may not meet this threshold.
+                    Waiting for a fresh GPS fix to show on the map. Low-accuracy fixes are shown with their uncertainty; restricted-area checks require GPS accuracy of 20 m or better.
                   </span>
                 </p>
               )}
