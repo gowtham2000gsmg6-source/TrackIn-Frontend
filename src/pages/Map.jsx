@@ -87,12 +87,12 @@ function FitToMarkers({ points, fitRequest }) {
   return null
 }
 
-function FlyToSelected({ selected }) {
+function FlyToSelected({ selectedId, position }) {
   const map = useMap()
   useEffect(() => {
-    if (!selected) return
-    map.flyTo([selected.last_latitude, selected.last_longitude], 19, { duration: 0.75 })
-  }, [selected?.visitor_id, map])
+    if (!selectedId || !position) return
+    map.flyTo(position, 19, { duration: 0.75 })
+  }, [selectedId, position?.[0], position?.[1], map])
   return null
 }
 
@@ -131,18 +131,12 @@ export default function MapPage() {
     return () => clearInterval(interval)
   }, [load])
 
-  const located = visitors.filter((v) => v.last_latitude != null && v.last_longitude != null)
-  const notLocated = visitors.filter((v) => v.last_latitude == null || v.last_longitude == null)
-  const points = [
-    ...located.map((v) => [v.last_latitude, v.last_longitude]),
-    ...receivers.filter((r) => r.status === 'active').map((r) => [r.latitude, r.longitude]),
-  ]
+  const gpsLocated = visitors.filter((v) => v.last_latitude != null && v.last_longitude != null)
   const activeReceivers = receivers.filter((receiver) => receiver.status === 'active')
   const receiverById = Object.fromEntries(activeReceivers.map((receiver) => [receiver.id, receiver]))
   const restrictedReceivers = activeReceivers.filter((receiver) => receiver.is_restricted)
   const restrictedReceiverIds = new Set(restrictedReceivers.map((receiver) => receiver.id))
   const restrictedEntries = logs.filter((log) => restrictedReceiverIds.has(log.receiver_id))
-  const selected = located.find((v) => v.visitor_id === selectedId) || null
 
   const getVisitorMapPosition = (visitor) => {
     const strongestBle = visitor.nearby_bluetooth?.reduce((best, current) => {
@@ -150,14 +144,34 @@ export default function MapPage() {
       return best
     }, null)
     const bleReceiver = strongestBle ? receiverById[strongestBle.receiver_id] : null
+    if (bleReceiver) {
+      return {
+        // A single receiver provides an anchor location, not the visitor's exact position.
+        position: [bleReceiver.latitude, bleReceiver.longitude],
+        strongestBle,
+        bleReceiver,
+        estimatedBleDistance: estimateBleDistance(strongestBle.rssi),
+        source: 'BLE',
+      }
+    }
+    const hasGps = visitor.last_latitude != null && visitor.last_longitude != null
     return {
-      // BLE confirms proximity to a receiver; it is not the visitor's location.
-      position: [visitor.last_latitude, visitor.last_longitude],
-      strongestBle,
-      bleReceiver,
-      estimatedBleDistance: strongestBle ? estimateBleDistance(strongestBle.rssi) : null,
+      position: hasGps ? [visitor.last_latitude, visitor.last_longitude] : null,
+      strongestBle: null,
+      bleReceiver: null,
+      estimatedBleDistance: null,
+      source: hasGps ? 'GPS' : null,
     }
   }
+
+  const located = visitors.filter((visitor) => getVisitorMapPosition(visitor).position)
+  const notLocated = visitors.filter((visitor) => !getVisitorMapPosition(visitor).position)
+  const selected = located.find((visitor) => visitor.visitor_id === selectedId) || null
+  const selectedPosition = selected ? getVisitorMapPosition(selected).position : null
+  const points = [
+    ...located.map((visitor) => getVisitorMapPosition(visitor).position),
+    ...activeReceivers.map((receiver) => [receiver.latitude, receiver.longitude]),
+  ]
 
   const handleSelect = (visitorId) => {
     const v = located.find((x) => x.visitor_id === visitorId)
@@ -212,7 +226,7 @@ export default function MapPage() {
 
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         {[
-          { label: 'Sharing GPS', value: located.length, detail: `${notLocated.length} without a fix`, icon: Users, color: 'text-sky-300', tint: 'bg-sky-400/10' },
+          { label: 'Live locations', value: located.length, detail: `${gpsLocated.length} GPS · BLE anchors included`, icon: Users, color: 'text-sky-300', tint: 'bg-sky-400/10' },
           { label: 'Active receivers', value: activeReceivers.length, detail: 'Live geofence anchors', icon: MapPin, color: 'text-emerald-300', tint: 'bg-emerald-400/10' },
           { label: 'Restricted zones', value: restrictedReceivers.length, detail: 'Red geofence boundaries', icon: ShieldAlert, color: 'text-rose-300', tint: 'bg-rose-400/10' },
           { label: 'Restricted entries', value: restrictedEntries.length, detail: 'Recent proximity events', icon: ShieldCheck, color: 'text-amber-300', tint: 'bg-amber-400/10' },
@@ -291,12 +305,12 @@ export default function MapPage() {
             />
           )}
           <FitToMarkers points={points} fitRequest={fitRequest} />
-          <FlyToSelected selected={selected} />
+          <FlyToSelected selectedId={selected?.visitor_id} position={selectedPosition} />
           {located.map((v) => {
             const mapPosition = getVisitorMapPosition(v)
             return (
               <React.Fragment key={v.visitor_id}>
-                {v.last_accuracy > 0 && !mapPosition.strongestBle && (
+                {v.last_accuracy > 0 && mapPosition.source === 'GPS' && (
                   <Circle
                     center={mapPosition.position}
                     radius={v.last_accuracy}
@@ -328,6 +342,7 @@ export default function MapPage() {
                   ref={(el) => {
                     if (el) markerRefs.current[v.visitor_id] = el
                   }}
+                  zIndexOffset={mapPosition.source === 'BLE' ? 1000 : 0}
                   eventHandlers={{ click: () => setSelectedId(v.visitor_id) }}
                 >
                   <Popup>
@@ -338,19 +353,19 @@ export default function MapPage() {
                       {v.last_accuracy != null ? (
                         <p className="text-xs mt-2 text-sky-700">
                           GPS reported accuracy ±{Math.round(v.last_accuracy)} m
-                          {mapPosition.strongestBle ? ' · separate from BLE estimate' : ''}
+                          {mapPosition.source === 'BLE' ? ' · BLE anchor is currently shown instead' : ''}
                         </p>
                       ) : null}
                       {mapPosition.strongestBle && (
                         <>
                           <p className="text-xs mt-2 text-violet-700">
-                            BLE detected near {mapPosition.strongestBle.receiver_name} · {mapPosition.strongestBle.rssi} dBm
+                            BLE location anchor: {mapPosition.strongestBle.receiver_name} · {mapPosition.strongestBle.rssi} dBm
                             {mapPosition.estimatedBleDistance != null
                               ? ` · rough RSSI distance ≈ ${mapPosition.estimatedBleDistance < 10 ? mapPosition.estimatedBleDistance.toFixed(1) : Math.round(mapPosition.estimatedBleDistance)} m`
                               : ''}
                           </p>
                           <p className="text-[11px] mt-1 text-slate-500">
-                            The visitor marker stays at GPS coordinates. BLE distance is an uncalibrated estimate and does not provide direction or guarantee 5–10 m accuracy.
+                            The marker uses the receiver's registered coordinates while BLE is detected. RSSI distance is an uncalibrated estimate; one receiver cannot determine direction or guarantee 5–10 m accuracy.
                           </p>
                         </>
                       )}
@@ -426,7 +441,7 @@ export default function MapPage() {
           })}
         </MapContainer>
         <div className="flex flex-col gap-1 border-t border-white/[0.08] bg-slate-900/95 px-4 py-3 text-[11px] text-white/40 sm:flex-row sm:items-center sm:justify-between">
-          <span>Blue circles show reported GPS uncertainty. A purple receiver ring means BLE detected a participating visitor nearby; it is not an exact GPS position.</span>
+          <span>With BLE detected, the visitor marker uses the receiver's registered location and the purple ring shows rough RSSI distance. Otherwise, the marker uses GPS and the blue circle shows reported uncertainty. BLE does not guarantee exact 5–10 m positioning.</span>
           <span className="flex items-center gap-1.5">
             <Clock3 size={12} />
             {lastRefresh ? `Updated ${lastRefresh.toLocaleTimeString()}` : 'Waiting for live data'}
@@ -475,7 +490,7 @@ export default function MapPage() {
         <div className="rounded-xl border border-white/10 bg-white/[0.02]">
           <div className="flex items-center gap-2 border-b border-white/10 px-4 py-4 text-brass-50">
             <Wifi size={15} className="text-signal-green" />
-            <h2 className="text-sm">Sharing location ({located.length})</h2>
+            <h2 className="text-sm">Located by GPS or BLE ({located.length})</h2>
           </div>
           <div className="divide-y divide-white/10">
             {located.length ? located.map((v) => (
@@ -491,7 +506,11 @@ export default function MapPage() {
                     {v.full_name}
                   </p>
                   <p className="text-xs text-white/40 font-mono">{v.visitor_id} · {v.department}</p>
-                  {v.nearby_bluetooth?.map((device) => (
+                  {getVisitorMapPosition(v).source === 'BLE' ? (
+                    <p className="text-xs mt-1 flex items-center gap-1 text-violet-300">
+                      <Bluetooth size={12} /> Showing BLE receiver anchor: {getVisitorMapPosition(v).strongestBle.receiver_name}
+                    </p>
+                  ) : v.nearby_bluetooth?.map((device) => (
                     <p key={device.receiver_id} className="text-xs mt-1 flex items-center gap-1 text-signal-green">
                       <Bluetooth size={12} /> Near {device.receiver_name} · {device.rssi} dBm
                     </p>
